@@ -453,11 +453,14 @@ class Agent:
             "memory": memory,
         }
         try:
+            # execute the skill
             result = self._skills[skill](message.payload, ctx)
             # Validate response
             if not isinstance(result, dict):
                 return {"status": "error", "error": "skill_returned_non_object"}
             validate_agent_response(result)
+            # return validated JSON-like dicts, e.g.: 
+            # { "status":"ok", "result": {...}, "memories":[...], "next_tasks":[...] }
             return result
         except Exception as e:
             logger.exception("Agent skill %s raised", skill)
@@ -695,24 +698,50 @@ class GraphOrchestrator:
 # - next_tasks: optional list of nodes to add
 # - memories: optional list of memory items to store
 
+# SKILLS
+# They are examples of tools or task handlers inside your agentic orchestration system.
+# When the orchestrator runs a TaskNode, it builds a structured payload and passes it to the corresponding agent’s skill function.
 
 def skill_fetch(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    # Demonstration: pretend to fetch data based on query
+    '''
+    simulate fetching data + schedule next task
+    '''
+    # Demonstration: pretend to fetch data based on query (simulates a data request)
+    # payload comes from the orchestrator.
     inputs = payload.get("inputs", {})
     query = payload.get("metadata", {}).get("query") or payload.get("query") or "default query"
-    # produce faux data
+
+    # produce faux data (Generate fake data)
+    # This mimics the response from a real API or database fetch.
     data = {"fetched_at": iso_now(), "query": query, "items": [f"item_{i}" for i in range(3)]}
+
+    # Build result response: Puts the fake data under "result".
     result = {"status": "ok", "result": data}
+
+    # Adds a list of memory records to result["memories"].
     # store a short memory and offer a next task 'process'
+    # The orchestrator will save this in both short-term and long-term memory for later recall
     result["memories"] = [{"type": "fetch", "detail": data}]
-    # next task instructs the orchestrator to create a processing node that depends on this node
+
+    # (Schedule a new task) next task instructs the orchestrator to create a processing node that depends on this node
+    # result["next_tasks"] is a list of task descriptors that the orchestrator will use to dynamically insert new nodes into the task graph.
+    # This allows automatic chaining: after fetch completes, the system creates a processing node.
     result["next_tasks"] = [
-        {"name": "process_results", "agent_id": ctx["session"].get("metadata", {}).get("processor_agent", "agent_processor"), "action": "process", "inputs": [payload.get("metadata", {}).get("origin_node") or "unknown_parent"]}
+        {"name": "process_results", 
+         "agent_id": ctx["session"].get("metadata", {}).get("processor_agent", "agent_processor"), 
+         "action": "process", 
+         "inputs": [payload.get("metadata", {}).get("origin_node") or "unknown_parent"] #input: this current node’s ID (the “origin node”).
+         }
     ]
-    return result
+    return result  
+    # The orchestrator will:
+    # mark the node as done -> store the memory -> add the next task to the graph -> and trigger further execution.
 
 
 def skill_process(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    '''
+    process parent results and summarize
+    '''
     # Process data from inputs
     inputs = payload.get("inputs", {})
     # flatten parent results

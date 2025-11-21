@@ -1,0 +1,17 @@
+
+version: "3.9"
+
+services:
+  orchestrator:
+    build: ./orchestrator
+    ports:
+      - "8000:8000"
+    environment:
+      - MCP_TOOL_URL=http://mcp-tool:9000
+    depends_on:
+      - mcp-tool
+
+  mcp-tool:
+    build: ./mcp_tool
+    ports:
+      - "9000:9000"

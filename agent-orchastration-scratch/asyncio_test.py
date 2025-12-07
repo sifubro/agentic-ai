@@ -74,6 +74,8 @@ async def cancellable_reader():
             await asyncio.sleep(0)  # <- cooperative yield
     print("Reader: end")
 
+
+
 async def main_non_blocking_cooperative_yield():
     task = asyncio.create_task(cancellable_reader())
     await asyncio.sleep(1)  # allow some chunks
@@ -96,7 +98,9 @@ if __name__ == "__main__":
 
     # TODO:
     # 1. Process network request, I/O, call gpts, other tasks concurently
-    # 2. 
+    # 2. Access a DB and write stuff to it
+    # 
+    # 
 
 
 

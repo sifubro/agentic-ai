@@ -107,6 +107,7 @@ RUN pip install fastapi "uvicorn[standard]" pydantic
 EXPOSE 9000
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "9000"]
 
+#https://chatgpt.com/c/69061637-7ef4-8332-906d-e6efcb5bb0d4
 
 
 ### worker/worker.py — containerized task worker (image used by orchestrator)
@@ -234,7 +235,13 @@ class ToolAgent(BaseAgent):
         async def skill(payload, ctx):
             args = payload.get("args", payload.get("metadata", {}))
             tool_res = await self.call_tool(tool_name, args)
-            return {"status":"ok", "result": tool_res.get("result", {}), "memories": [{"type":"tool", "tool":tool_name, "output": tool_res.get("result", {})}], "next_tasks": tool_res.get("next_tasks", [])}
+            return {"status":"ok", 
+                    "result": tool_res.get("result", {}), 
+                    "memories": [{"type":"tool", 
+                                  "tool":tool_name, 
+                                  "output": tool_res.get("result", {})}], 
+                    "next_tasks": tool_res.get("next_tasks", [])
+                                  }
         self.register_skill(f"tool_{tool_name}", skill)
 
 # OpenAI agent (calls gpt4o)
@@ -286,8 +293,15 @@ class OpenAIAgent(BaseAgent):
                             if "=" in kv:
                                 k,v = kv.split("=",1)
                                 args[k]=v
-                        next_tasks.append({"name": f"auto_{toolname}_{i}", "agent_id": "tool_agent", "action": f"tool_{toolname}", "inputs": [], "metadata": {"args": args}})
-            return {"status":"ok", "result":{"text": text}, "memories":[{"type":"llm","model":"gpt4o","content":text}], "next_tasks": next_tasks}
+                        next_tasks.append({"name": f"auto_{toolname}_{i}", 
+                                           "agent_id": "tool_agent", 
+                                           "action": f"tool_{toolname}", 
+                                           "inputs": [], 
+                                           "metadata": {"args": args}})
+            return {"status":"ok", 
+                    "result":{"text": text}, 
+                    "memories":[{"type":"llm","model":"gpt4o","content":text}], 
+                    "next_tasks": next_tasks}
         self.register_skill("ask_gpt4o", ask_gpt)
 
 # Reviewer: policy checks to avoid unsafe commands
@@ -316,7 +330,10 @@ class ReviewerAgent(BaseAgent):
 
 # Executor that spawns Docker containers for tasks
 class ContainerExecutorAgent(BaseAgent):
-    def __init__(self, agent_id: str, name: str, worker_image: str = "task_worker:latest", docker_url: str = "unix://var/run/docker.sock"):
+    def __init__(self, agent_id: str, 
+                 name: str, 
+                 worker_image: str = "task_worker:latest", 
+                 docker_url: str = "unix://var/run/docker.sock"):
         super().__init__(agent_id, name)
         # docker client
         self.client = docker.from_env()
@@ -344,7 +361,11 @@ class ContainerExecutorAgent(BaseAgent):
 
 
 
-
+'''
+Note: using docker-py requires the orchestrator container to have access to Docker socket or Docker Engine. 
+This is powerful but dangerous — in production use a controlled job runner / container orchestrator 
+like Kubernetes with proper RBAC.
+'''
 
 
 
@@ -384,6 +405,7 @@ class MemoryManager:
         rows = cur.fetchall()
         return [json.loads(r[0]) for r in rows]
 
+
 # Simple TaskNode & Graph
 class TaskNode:
     def __init__(self, node_id, name, agent_id, action, inputs=None, metadata=None):
@@ -393,6 +415,8 @@ class TaskNode:
 
     def to_dict(self):
         return {"node_id": self.node_id, "name": self.name, "agent_id": self.agent_id, "action": self.action, "inputs": self.inputs, "metadata": self.metadata, "status": self.status, "result": self.result}
+
+
 
 class Orchestrator:
     def __init__(self, mcp_base: str, openai_key: str, worker_image: str = "task_worker:latest"):
@@ -472,11 +496,18 @@ class Orchestrator:
             # add dynamic next_tasks
             for nt in resp.get("next_tasks", []):
                 nid = nt.get("node_id") or ("dyn_" + str(len(self.nodes)+1))
-                new_node = TaskNode(node_id=nid, name=nt.get("name",nid), agent_id=nt.get("agent_id"), action=nt.get("action"), inputs=nt.get("inputs", []), metadata=nt.get("metadata", {}))
+                new_node = TaskNode(node_id=nid, 
+                                    name=nt.get("name",nid), 
+                                    agent_id=nt.get("agent_id"),
+                                      action=nt.get("action"), 
+                                      inputs=nt.get("inputs", []), 
+                                      metadata=nt.get("metadata", {}))
                 try:
                     self.add_node(new_node)
                 except Exception:
                     pass
+
+
 
     async def execute_graph(self, session: Dict[str,Any], max_iters: int = 1000):
         iterations = 0
@@ -493,6 +524,9 @@ class Orchestrator:
                 await asyncio.gather(*tasks)
         return {"status":"ok", "report": {nid: n.to_dict() for nid,n in self.nodes.items()}}
 
+
+
+
     # high-level helper: run from a user prompt
     async def run_from_prompt(self, user_id: str, session_id: str, prompt: str):
         # discover tools
@@ -505,7 +539,8 @@ class Orchestrator:
                                        like: TOOL: fake_search query=<term> or TOOL: run_shell cmd=<cmd>."})
         self.add_node(plan_node)
         # 2) add an aggregator node that will summarise results at the end (created up front or dynamically)
-        agg_node = TaskNode(node_id="agg_1", name="Aggregate", agent_id="openai_agent", action="ask_gpt4o", inputs=["plan_1"], metadata={"prompt":"Summarise outputs: {inputs}"})
+        agg_node = TaskNode(node_id="agg_1", name="Aggregate", agent_id="openai_agent", action="ask_gpt4o", 
+                            inputs=["plan_1"], metadata={"prompt":"Summarise outputs: {inputs}"})
         self.add_node(agg_node)
         session = {"session_id": session_id, "user_id": user_id}
         report = await self.execute_graph(session)
@@ -562,6 +597,7 @@ EXPOSE 8000
 CMD ["uvicorn", "orchestrator.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
 '''
+TODO:
 Next steps I can do for you (pick any)
 
 Replace the mock MCP server with an official MCP server library (stdio or streamable HTTP) and show exact MCP negotiation.
@@ -588,7 +624,7 @@ Which would you like me to do next?
 
 
 
-
+# https://chatgpt.com/c/69061637-7ef4-8332-906d-e6efcb5bb0d4
 
 
 
@@ -717,6 +753,9 @@ class StreamInput(BaseModel):
 
 
 
+
+
+
 '''
 What is the alias used for in Field()?
 
@@ -728,7 +767,7 @@ How this metadata is used by
 - Debugging tools?
 
 
-
+TODO:
 While streaming, GPT-4o can:
 
 summarize partial results
@@ -738,12 +777,532 @@ detect errors
 spawn new subtasks
 
 update the user interface live
+'''
 
 
 
+🎯 Realistic worker: HTTP version (worker_http.py)
+# worker_http.py
+
+import aiohttp
+import asyncio
+import logging
+from pydantic import BaseModel, ValidationError
+from tools import run_tool
+
+logger = logging.getLogger(__name__)
+
+
+class WorkerTask(BaseModel):
+    task_id: str
+    tool: str
+    arguments: dict
+    callback_url: str
+
+
+async def handle_task(task: WorkerTask):
+    """
+    Executes a tool and POSTs incremental updates + final result
+    back to the orchestrator.
+    """
+
+    async with aiohttp.ClientSession() as session:
+        # Notify orchestrator start
+        await session.post(task.callback_url, json={
+            "task_id": task.task_id,
+            "event": "start"
+        })
+
+        async for event in run_tool(task.tool, task.arguments):
+            await session.post(task.callback_url, json={
+                "task_id": task.task_id,
+                "event": event["event"],
+                "data": event["data"]
+            })
+
+        # Notify orchestrator completion
+        await session.post(task.callback_url, json={
+            "task_id": task.task_id,
+            "event": "completed"
+        })
+
+
+async def main():
+    """
+    A real-world worker pulls tasks from the orchestrator.
+    """
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            resp = await session.get("http://orchestrator/tasks/next")
+
+            if resp.status == 204:
+                await asyncio.sleep(1)
+                continue
+
+            body = await resp.json()
+
+            try:
+                task = WorkerTask(**body)
+            except ValidationError as e:
+                logger.error(f"Invalid task received: {e}")
+                continue
+
+            await handle_task(task)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+'''
+✅ Worker Implementations for Real Deployment
+
+We will implement two versions of the worker:
+
+RabbitMQ-based worker (AMQP)
+
+Redis Streams worker (XADD / XREADGROUP)
+
+Both workers:
+
+✔ Receive tasks asynchronously
+✔ Validate input using Pydantic
+✔ Execute MCP tools (or any other executor)
+✔ Stream events back to the Orchestrator via HTTP callbacks
+✔ Are safe for real production deployment
+✔ Include reconnection, heartbeats, retry handling, and backpressure control
+
+'''
+
+
+🐇 RabbitMQ Worker Implementation (worker_rabbitmq.py)
+# worker_rabbitmq.py
+
+import asyncio
+import aiohttp
+import json
+import logging
+import traceback
+from pydantic import BaseModel, ValidationError
+from aio_pika import connect_robust, IncomingMessage
+from tools import run_tool  # your MCP tool wrapper
+
+logger = logging.getLogger(__name__)
+
+
+# -------------------------
+# TASK SCHEMA
+# -------------------------
+class WorkerTask(BaseModel):
+    task_id: str
+    tool: str
+    arguments: dict
+    callback_url: str
+
+
+# -------------------------
+# CALLBACK SENDER
+# -------------------------
+async def send_callback(session: aiohttp.ClientSession, url: str, payload: dict):
+    try:
+        await session.post(url, json=payload)
+    except Exception:
+        logger.error(f"Failed to send callback to {url}", exc_info=True)
+
+
+# -------------------------
+# TASK EXECUTION LOGIC
+# -------------------------
+async def execute_task(task: WorkerTask):
+    """
+    Execute a tool and stream updates back to orchestrator.
+    """
+    async with aiohttp.ClientSession() as session:
+
+        # Notify start
+        await send_callback(session, task.callback_url, {
+            "task_id": task.task_id,
+            "event": "started"
+        })
+
+        try:
+            async for event in run_tool(task.tool, task.arguments):
+                await send_callback(session, task.callback_url, {
+                    "task_id": task.task_id,
+                    "event": event["event"],
+                    "data": event["data"]
+                })
+
+            # Final completion
+            await send_callback(session, task.callback_url, {
+                "task_id": task.task_id,
+                "event": "completed"
+            })
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            logger.error(f"Task {task.task_id} crashed", exc_info=True)
+            await send_callback(session, task.callback_url, {
+                "task_id": task.task_id,
+                "event": "error",
+                "error": str(e),
+                "trace": tb
+            })
+
+
+# -------------------------
+# MESSAGE HANDLER
+# -------------------------
+async def handle_message(message: IncomingMessage):
+    async with message.process():
+        try:
+            data = json.loads(message.body)
+            task = WorkerTask(**data)
+            asyncio.create_task(execute_task(task))
+
+        except ValidationError as ve:
+            logger.error("Invalid task received: %s", ve)
+        except Exception:
+            logger.error("Unexpected worker error", exc_info=True)
+
+
+# -------------------------
+# MAIN LOOP
+# -------------------------
+async def main():
+    # reconnect forever
+    while True:
+        try:
+            logger.info("Connecting to RabbitMQ…")
+            conn = await connect_robust("amqp://guest:guest@rabbitmq/")
+            channel = await conn.channel()
+            queue = await channel.declare_queue("tasks.queue", durable=True)
+
+            logger.info("Worker subscribed to tasks.queue")
+
+            await queue.consume(handle_message, no_ack=False)
+
+            await asyncio.Future()  # block forever
+
+        except Exception:
+            logger.error("RabbitMQ connection lost, retrying in 5s…", exc_info=True)
+            await asyncio.sleep(5)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+
+
+
+'''
+TODO:
+
+            tb = traceback.format_exc()
+            logger.error(f"Task {task.task_id} crashed", exc_info=True)
+
+TODO:
+Because the code uses message.process() and then immediately schedules execute_task in the background and exits the with block, the message gets acknowledged immediately (the moment the handler returns normally), while the actual execute_task work will continue in the background
+conn = await connect_robust("amqp://guest:guest@rabbitmq/")
+
+'''
+
+
+
+# worker_redis.py
+
+import asyncio
+import json
+import logging
+import traceback
+from pydantic import BaseModel, ValidationError
+from redis.asyncio import Redis
+import aiohttp
+from tools import run_tool
+
+logger = logging.getLogger(__name__)
+
+STREAM = "tasks.stream"
+GROUP = "workers"
+CONSUMER = "worker-1"
+
+
+class WorkerTask(BaseModel):
+    task_id: str
+    tool: str
+    arguments: dict
+    callback_url: str
+
+
+async def send_callback(session, url, payload):
+    try:
+        await session.post(url, json=payload)
+    except Exception as e:
+        logger.error(f"Error sending callback: {e}")
+
+
+async def execute_task(task: WorkerTask):
+    async with aiohttp.ClientSession() as session:
+
+        await send_callback(session, task.callback_url, {
+            "task_id": task.task_id,
+            "event": "started"
+        })
+
+        try:
+            async for event in run_tool(task.tool, task.arguments):
+                await send_callback(session, task.callback_url, {
+                    "task_id": task.task_id,
+                    "event": event["event"],
+                    "data": event["data"]
+                })
+
+            await send_callback(session, task.callback_url, {
+                "task_id": task.task_id,
+                "event": "completed"
+            })
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            await send_callback(session, task.callback_url, {
+                "task_id": task.task_id,
+                "event": "error",
+                "error": str(e),
+                "trace": tb
+            })
+
+
+async def main():
+    redis = Redis(host="redis", port=6379, decode_responses=True)
+
+    # create consumer group if needed
+    try:
+        await redis.xgroup_create(STREAM, GROUP, id="0", mkstream=True)
+    except Exception:
+        pass  # already exists
+
+    while True:
+        try:
+            messages = await redis.xreadgroup(
+                group=GROUP,
+                consumer=CONSUMER,
+                streams={STREAM: ">"},
+                count=1,
+                block=5000
+            )
+
+            if not messages:
+                continue
+
+            for stream, data_list in messages:
+                for msg_id, fields in data_list:
+                    try:
+                        task = WorkerTask(**json.loads(fields["payload"]))
+                        asyncio.create_task(execute_task(task))
+                    except Exception:
+                        logger.error("Bad task", exc_info=True)
+
+                    # Acknowledge success
+                    await redis.xack(STREAM, GROUP, msg_id)
+
+        except Exception:
+            logger.error("Redis worker failed, retrying in 3s…", exc_info=True)
+            await asyncio.sleep(3)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+'''
+✔ READY FOR NEXT STEPS
+
+I can now continue with:
+
+✅ Add orchestration microservices
+✅ Add dynamic graph mutation
+✅ Add memory + long-term recall
+✅ Add GPT-4o + Gemini multi-agent collaboration
+✅ Add real MCP server with streaming tools
+✅ Add Docker Compose files connecting:
+
+orchestrator
+
+RabbitMQ or Redis
+
+workers
+
+mcp-tool-server
+
+GPT/OpenAI agents
+
+Just say:
+👉 “Continue with architecture”
+or specify something more specific.
+
+
+'''
+
+
+
+
+
+
+
+
+
+
+# THE END
+'''
+TODO: 
+# Agent microservices demo (with RabbitMQ, MCP streaming, dynamic graph, LLM agents)
+
+How can I let my agent in  Langgraph dynamically create new nodes?
 
 TODO:
 1. thread vs coroutine vs multiprocess
 2. starting new containers
-3. back and forth from gpt4 to fill the fields (pydantic validation) and 
+3. back and forth from gpt4 to fill the fields (pydantic validation) and make an API call to see flights and take an action
+4. 
+5. 
+6. 
+
+
+
+
+
+
+
+
+🎉 NEXT STEPS AVAILABLE WHEN YOU SAY “continue”
+
+Orchestrator UI + live graph visualization
+
+Full error propagation model
+
+Data provenance tracing
+
+
+
+I can now add:
+
+🔥 Advanced Features
+
+Auto-scaling workers
+
+Multi-agent negotiation protocol
+
+Persistent DAG state (Postgres)
+
+Worker sandboxing (Docker API)
+
+Complete high availability setup
+
+Secure tokenized authentication across microservices
+
+🧠 Advanced AI Logic
+
+Planner memory integration
+
+Tool selection heuristics
+
+Cross-agent debate + arbitration
+
+Self-healing DAGs
+
 '''
+
+
+Example: Kubernetes Deployment + HPA
+# worker-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gemini-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gemini-worker
+  template:
+    metadata:
+      labels:
+        app: gemini-worker
+    spec:
+      containers:
+        - name: worker
+          image: your-registry/gemini-worker:latest
+          env:
+            - name: RABBITMQ_URL
+              value: amqp://guest:guest@rabbitmq/
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gemini-secret
+                  key: api_key
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gemini-worker-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gemini-worker
+  minReplicas: 1
+  maxReplicas: 20
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: rabbitmq_queue_messages_ready
+        target:
+          type: AverageValue
+          averageValue: "50"   # e.g., aim ~50 messages per worker
+
+
+You’d wire this with a RabbitMQ metrics adapter (Prometheus + custom metric) so rabbitmq_queue_messages_ready reflects backlog.
+
+Orchestrator doesn’t change at all: it just keeps publishing tasks; K8s scales workers to keep up.
+
+'''
+Take one part and fully implement it end-to-end (e.g. the negotiation protocol with real prompts + agent code),
+
+
+Next Features I can add:
+
+Full CriticAgent and ArbiterAgent definitions
+
+UI dashboard showing live DAG graph + worker queues
+
+Vector memory store + embeddings
+
+Kubernetes deployment + autoscaler configs
+
+Worker container sandbox enforcement using Docker or Firecracker
+
+Billing + quotas
+
+Real-time WebSocket streaming instead of NDJSON
+'''
+
+
+
+
+
+
+'''
+TODO:
+class SearchInput(BaseModel):
+    query: str = Field(...)
+
+from fastapi.responses import StreamingResponse
+
+return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+'''
+

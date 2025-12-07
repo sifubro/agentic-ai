@@ -1,0 +1,145 @@
+https://chatgpt.com/c/6928a49a-e490-832b-8c88-4c5258cca5cc#
+https://chatgpt.com/c/6928a49a-e490-832b-8c88-4c5258cca5cc#
+https://chatgpt.com/c/6928a49a-e490-832b-8c88-4c5258cca5cc#
+
+
+
+⭐ 3. How to Design Agent Tools to Maximize Correctness
+
+Below are my best practices based on deep experience with agent systems.
+
+🧩 Rule 1 — Use Literal Everywhere Possible
+
+Example:
+
+topic: Literal["general", "news", "finance"]
+
+
+Why it works:
+
+Converts into "enum" in JSON schema
+
+Strong token bias for LLM
+
+Prevents hallucinated new categories
+
+Enables self-correction loops
+
+This alone reduces tool-call errors by 40–80%.
+
+🧩 Rule 2 — Replace Strings with Enums or Literals
+
+Never use:
+
+category: str
+
+
+Always use:
+
+category: Literal["A", "B", "C"]
+
+
+Or:
+
+from enum import Enum
+
+class Category(str, Enum):
+    A = "A"
+    B = "B"
+    C = "C"
+
+
+LLMs love bounded choices.
+
+🧩 Rule 3 — Avoid Nested Freeform JSON
+
+Bad:
+
+filters: dict
+
+
+Better:
+
+class Filters(BaseModel):
+    min_price: Optional[int]
+    max_price: Optional[int]
+    category: Literal["tech", "home", "fashion"]
+
+
+Structure beats flexibility.
+
+🧩 Rule 4 — Keep Tools Atomic
+
+Each tool should do exactly ONE thing.
+
+Good tools:
+
+get_weather
+
+search_news
+
+send_email
+
+calculate_distance
+
+Bad tool:
+
+do_everything(user_query)
+
+Atomic tools → less model confusion → more correctness.
+
+🧩 Rule 5 — Avoid Ambiguity in Arguments
+
+Example:
+Bad:
+
+sort: str
+
+
+Good:
+
+sort: Literal["asc", "desc"]
+
+
+Or:
+
+sort: Literal["price_low_to_high", "price_high_to_low", "newest_first"]
+
+
+The more specific the schema, the fewer the errors.
+
+🧩 Rule 6 — Use “Implicit Defaults” to Prevent Missing Fields
+limit: int = 10
+topic: Literal["general", "news", "finance"] = "general"
+
+
+Defaults prevent the model from forgetting required arguments.
+
+🧩 Rule 7 — Avoid Mixing Tool Calls and Natural Language
+
+Provide tools in clean, isolated schemas without requiring prompt gymnastics.
+
+Let the agent system decide.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+✔ Literal — restricts values to exact allowed options
+✔ Enum — adds structure and symbolic names
+✔ Field() — adds numeric, length, pattern constraints
+✔ field_validator — adds semantic, custom business rules
